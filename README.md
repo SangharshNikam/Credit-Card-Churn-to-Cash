@@ -19,13 +19,13 @@ A card issuer loses money long before a customer closes the card: spend and acti
 | Question | Result |
 |---|---|
 | Label-free decline score | AUC 0.79 on a held-out test set with no training; Welch's t-test: 0.670 (attrited) vs 0.467 (existing), Cohen's d = 1.32 |
-| Best model | LightGBM: ROC-AUC 0.993, Gini 0.986, KS 0.916 (Logistic Regression 0.916, Random Forest 0.981) |
+| Best model | LightGBM: ROC-AUC 0.993, Gini 0.986, KS 0.916. XGBoost is statistically tied (0.992-0.993) and LightGBM was kept as the final model; Random Forest 0.981; Logistic Regression 0.916 |
 | Ranking power | The riskiest 20% of customers contain 96.3% of attrition (top-decile lift 6.2x) |
 | Calibration | Raw model under-counted attrition by 3.3% (1,572.7 vs 1,627). After Platt scaling: 1,626.8. ECE 0.0069 to 0.0019, AUC unchanged |
 | Revenue at risk | 289,403 expected (9.6% of 3.02M annual revenue); back-test against customers who really left: 294,471 (gap -1.7%) |
 | How much is still savable | Only **46,692** sits with customers who have not left yet; **84% of the exposure is already lost** |
 | Uncertainty (Monte Carlo, 10,000 runs) | Savable revenue at risk: 95% range 43,439 to 55,918. APR is the biggest source of uncertainty, not the model |
-| Targeting | Contacting everyone loses 198,492. A default 0.5 cutoff nets +2,284. **Value-aware targeting of 125 customers nets +4,381 (about 2.4x return on offer cost)** |
+| Targeting | Contacting everyone loses 198,492. A default 0.5 cutoff nets +2,284. **Value-aware targeting of 125 customers nets +4,381 (about 2.4x return on offer cost) at the assumed 30% offer success rate**; at 10% success it nets 344 (see sensitivity below) |
 | Segments | "Grow" (4,169 customers) holds 62% of revenue at 1% average risk; "Protect" is 125 customers; 370 high-value customers have already left (win-back pool, 182K past annual revenue) |
 | Drivers | For 81% of the 125 Protect customers the top SHAP driver is transaction count; demographics almost never appear |
 | Actions | 98% of Protect customers fall into two themes: spend activation (103) and high-spender retention (19) |
@@ -41,7 +41,7 @@ All money figures are **under stated assumptions** (see below).
 | 3 | `stage03_hypothesis_testing.py` | Welch's t-test, Mann-Whitney, Cohen's d |
 | 4 | `stage04_chi_square.py` | Chi-square + Cramer's V + Bonferroni on categorical features |
 | 5 | `stage05_anova.py` | ANOVA, Kruskal-Wallis, Tukey across card categories |
-| 6 | `stage06_model_training.py` | Stratified split; Logistic Regression vs Random Forest vs LightGBM |
+| 6 | `stage06_model_training.py` | Stratified split; Logistic Regression vs Random Forest vs LightGBM vs XGBoost |
 | 7 | `stage07_gini_lift_calibration.py` | Gini, gain/lift, calibration check |
 | 8 | `stage08_revenue_at_risk.py` | Out-of-fold predictions, Platt calibration, revenue-at-risk, back-test |
 | 9 | `stage09_monte_carlo.py` | 10,000 simulations over APR, interchange and probability error |
@@ -68,12 +68,35 @@ All money figures are **under stated assumptions** (see below).
 
 Revenue = revolving balance x APR + 12-month spend x interchange. It is **gross revenue, not profit** (no cost of funds, rewards or credit losses). Currency is presumably USD (income bands are in $) but the dataset does not say.
 
+## Sensitivity to the offer assumptions
+
+The offer cost and the success rate are the weakest assumptions: neither comes from the data. Instead of trusting a single guess, the project asks the reverse question: **how often must an offer work for contacting a customer to pay off?**
+
+```
+break-even success rate = offer cost / (attrition probability x annual revenue)
+```
+
+Example (illustrative numbers): with a 25 offer, a customer who has a 90% chance of leaving and 600 of annual revenue needs the offer to work only 4.6% of the time (25 / 540). A customer with the same risk but 100 of revenue needs 28% (25 / 90).
+
+In this data the most valuable at-risk customer has probability x revenue = 604, so at a 25 offer cost **any success rate above 4.1% makes contacting at least that customer worthwhile**. How much a whole campaign earns depends strongly on the rate (net benefit of the value-aware campaign, number of customers contacted in brackets):
+
+| Offer success rate | Offer cost 10 | **Offer cost 25** | Offer cost 50 |
+|---|---|---|---|
+| 5% | 269 (46) | 5 (1) | 0 (0) |
+| 10% | 1,266 (106) | **344** (32) | 10 (1) |
+| 15% | 2,534 (150) | 1,074 (63) | 206 (16) |
+| 20% | 3,947 (194) | 2,052 (87) | 687 (32) |
+| **30% (assumed)** | 7,060 (276) | **4,381** (125) | 2,148 (63) |
+| 40% | 10,423 (339) | 7,013 (158) | 4,104 (87) |
+
+The headline 4,381 therefore holds only at a 30% success rate. The real rate has to be measured with an A/B test before any rollout.
+
 ## Limitations
 
 - **Static snapshot with no dates.** Time-based validation and any "early warning" claim are not possible. The very high AUC (0.99) is typical for this dataset: many attrited customers have already gone quiet, so the model is better described as identifying disengaged customers than predicting future churn.
 - **Association, not causation.** SHAP drivers and the action playbook are hypotheses to test with a control group, not proven levers.
-- **Money figures depend on assumptions** above. Only the probabilities are validated against data.
-- **Limited model comparison:** three model families were compared (linear, bagging, boosting). XGBoost, CatBoost and hyperparameter tuning were not run.
+- **Money figures depend on assumptions** above (see the sensitivity table). Only the probabilities are validated against data.
+- **Limited model comparison:** four models were compared (linear, bagging, two boosting libraries). LightGBM and XGBoost are tied within cross-validation noise; LightGBM was kept because its raw Brier score is slightly better (0.0225 vs 0.0243). CatBoost and hyperparameter tuning were not run.
 - **Not deployed.** This is an analysis, not a scoring service.
 
 ## How to run
